@@ -3,3 +3,7 @@ pyserial==3.5
 paho-mqtt==1.6.1
 msgpack==1.0.8
 scipy==1.12.0
+pyserial
+paho-mqtt
+numpy
+colorlog

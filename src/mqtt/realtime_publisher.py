@@ -57,13 +57,17 @@ class RealtimePublisher(BasePublisher):
                 self._unpublished_mids.append(msg_info.mid)
                 current_time = time.time()
                 if current_time - self._last_warning_time > self._warning_log_delay:
-                    mid_list = ", ".join(map(str, self._unpublished_mids[-10:]))  # Chỉ hiện 10 Mid gần nhất
-                    count_msg = f" ({len(self._unpublished_mids)} messages)" if len(self._unpublished_mids) > 10 else ""
-                    logger.warning(f"Tin nhắn có thể chưa được gửi (is_published=False). Recent Mids: {mid_list}{count_msg}")
+                    total_unpublished = len(self._unpublished_mids)
+                    if total_unpublished > 0:
+                        first_mid = self._unpublished_mids[0]
+                        last_mid = self._unpublished_mids[-1]
+                        logger.warning(
+                            f"{total_unpublished} tin nhắn MQTT chưa được xác nhận. "
+                            f"MIDs từ {first_mid} đến {last_mid}."
+                        )
                     self._last_warning_time = current_time
-                    # Giữ lại chỉ 50 Mid gần nhất để tránh memory leak
-                    if len(self._unpublished_mids) > 50:
-                        self._unpublished_mids = self._unpublished_mids[-50:]
+                    # Xóa danh sách sau khi đã cảnh báo để bắt đầu đếm lại
+                    self._unpublished_mids.clear()
                 
         except Exception as e:
             logger.error(f"Lỗi khi gửi dữ liệu real-time: {e}") 
