@@ -7,3 +7,7 @@ pyserial
 paho-mqtt
 numpy
 colorlog
+PyYAML==6.0.1
+python-dotenv==1.0.0
+APScheduler==3.10.4
+pandas==2.0.3

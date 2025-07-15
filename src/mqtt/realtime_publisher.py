@@ -15,8 +15,9 @@ class RealtimePublisher(BasePublisher):
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
         self.compressor = self.get_compressor()
-        message_config = load_config('config/mqtt_message_config.json')
-        self.message_template = message_config['message_templates']['continuous']['structure']
+        app_config = load_config() 
+        message_config = app_config.get('mqtt_message', {})
+        self.message_template = message_config.get('message_templates', {}).get('continuous', {}).get('structure', {})
         
         # Throttling cho warning về unpublished messages
         self._last_warning_time = 0

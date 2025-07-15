@@ -15,6 +15,7 @@ from src.sensors.hwt905_data_decoder import HWT905DataDecoder
 from src.processing.data_processor import SensorDataProcessor
 from src.storage.storage_manager import StorageManager
 from src.core.async_data_manager import SerialReaderThread, DecoderThread, ProcessorThread, MqttPublisherThread
+from src.services import cleanup_manager, scheduled_mqtt_manager
 
 # Cờ để điều khiển vòng lặp chính
 _running_flag = threading.Event()
@@ -24,13 +25,27 @@ def signal_handler(signum, frame):
     logger = logging.getLogger(__name__)
     logger.info(f"Nhận tín hiệu {signum}. Đang dừng ứng dụng...")
     _running_flag.clear()
+    
+    # Dừng cleanup service
+    try:
+        cleanup_manager.stop()
+        logger.info("Cleanup service đã dừng")
+    except Exception as e:
+        logger.error(f"Lỗi khi dừng cleanup service: {e}")
+    
+    # Dừng scheduled MQTT service
+    try:
+        scheduled_mqtt_manager.stop()
+        logger.info("Scheduled MQTT service đã dừng")
+    except Exception as e:
+        logger.error(f"Lỗi khi dừng scheduled MQTT service: {e}")
 
 def main():
-    # 1. Tải cấu hình ứng dụng
+    # 1. Tải cấu hình ứng dụng từ .env và YAML files
     try:
-        app_config = load_config("config/app_config.json")
-    except (FileNotFoundError, json.JSONDecodeError, Exception) as e:
-        print(f"FATAL ERROR: Không thể tải file cấu hình app_config.json: {e}")
+        app_config = load_config()  # Sử dụng hệ thống cấu hình mới
+    except Exception as e:
+        print(f"FATAL ERROR: Không thể tải cấu hình ứng dụng: {e}")
         exit(1)
 
     # 2. Thiết lập hệ thống ghi log
@@ -49,13 +64,21 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     _running_flag.set()
+    
+    # 2.5. Khởi tạo và khởi động cleanup service
+    cleanup_config = app_config.get("cleanup", {})
+    if cleanup_config.get("enabled", True):
+        logger.info("Khởi tạo cleanup service...")
+        cleanup_manager.initialize(cleanup_config)
+        cleanup_manager.start()
 
     # 3. Đọc cấu hình điều khiển quy trình
     process_control_config = app_config.get("process_control", {})
     decoding_enabled = process_control_config.get("decoding", True)
     processing_enabled = process_control_config.get("processing", True)
     mqtt_sending_enabled = process_control_config.get("mqtt_sending", True)
-    logger.info(f"Cấu hình quy trình: Decoding={decoding_enabled}, Processing={processing_enabled}, MQTT Sending={mqtt_sending_enabled}")
+    mqtt_mode = process_control_config.get("mqtt_mode", "continuous")  # continuous hoặc scheduled
+    logger.info(f"Cấu hình quy trình: Decoding={decoding_enabled}, Processing={processing_enabled}, MQTT Sending={mqtt_sending_enabled}, MQTT Mode={mqtt_mode}")
 
     # 4. Khởi tạo các thành phần cốt lõi
     sensor_config = app_config["sensor"]
@@ -113,7 +136,8 @@ def main():
     # 6. Thiết lập pipeline với các hàng đợi
     raw_data_queue = Queue(maxsize=8192)
     decoded_data_queue = Queue(maxsize=8192) if processing_enabled else None
-    mqtt_queue = Queue(maxsize=8192) if mqtt_sending_enabled else None
+    # Chỉ tạo mqtt_queue nếu MQTT mode là continuous
+    mqtt_queue = Queue(maxsize=8192) if mqtt_sending_enabled and mqtt_mode == "continuous" else None
 
     # 7. Khởi tạo các luồng xử lý
     
@@ -145,13 +169,23 @@ def main():
             mqtt_queue=mqtt_queue
         )
 
-    # Luồng 4: Gửi MQTT (nếu được bật)
+    # Luồng 4: Gửi MQTT (nếu được bật và mode là continuous)
     mqtt_publisher_thread: Optional[MqttPublisherThread] = None
-    if mqtt_sending_enabled and mqtt_queue:
+    if mqtt_sending_enabled and mqtt_mode == "continuous" and mqtt_queue:
         mqtt_publisher_thread = MqttPublisherThread(
             mqtt_queue=mqtt_queue,
             running_flag=_running_flag
         )
+
+    # Khởi động scheduled MQTT service (nếu được bật và mode là scheduled)
+    if mqtt_sending_enabled and mqtt_mode == "scheduled":
+        scheduled_mqtt_config = app_config.get("scheduled_mqtt", {})
+        if scheduled_mqtt_config.get("enabled", False):
+            logger.info("Khởi tạo scheduled MQTT service...")
+            scheduled_mqtt_manager.initialize(scheduled_mqtt_config)
+            scheduled_mqtt_manager.start()
+        else:
+            logger.warning("MQTT mode is 'scheduled' but scheduled_mqtt.enabled is False")
 
     # 8. Chạy các luồng
     threads = [t for t in [reader_thread, decoder_thread, processor_thread, mqtt_publisher_thread] if t]

@@ -4,14 +4,17 @@ from pathlib import Path
 import random
 from typing import Dict, Any
 import numpy as np
+from .config_loader import load_config as load_config_new, load_config_legacy
+
 PACKET_TYPE_ACC = 0x01  # Giả sử đây là mã loại gói dữ liệu gia tốc
 
-def load_config(file_path: str) -> dict:
+def load_config(file_path: str = None) -> dict:
     """
-    Tải cấu hình từ một file JSON.
-
+    Tải cấu hình từ các nguồn khác nhau.
+    
     Args:
-        file_path (str): Đường dẫn đến file cấu hình JSON.
+        file_path (str, optional): Đường dẫn đến file cấu hình JSON (legacy).
+                                  Nếu None, sẽ tải cấu hình mới từ .env và YAML.
 
     Returns:
         dict: Một dictionary chứa dữ liệu cấu hình.
@@ -21,18 +24,12 @@ def load_config(file_path: str) -> dict:
         json.JSONDecodeError: Nếu file JSON không hợp lệ.
         Exception: Các lỗi khác trong quá trình đọc file.
     """
-    full_path = Path(file_path)
-    if not full_path.exists():
-        raise FileNotFoundError(f"File cấu hình không tìm thấy: {full_path}")
-    
-    try:
-        with open(full_path, 'r', encoding='utf-8') as f:
-            config = json.load(f)
-        return config
-    except json.JSONDecodeError as e:
-        raise json.JSONDecodeError(f"Lỗi cú pháp JSON trong file {full_path}: {e.msg} (at line {e.lineno}, column {e.colno})", e.doc, e.pos)
-    except Exception as e:
-        raise Exception(f"Lỗi khi tải file cấu hình {full_path}: {e}")
+    if file_path is None:
+        # Use new configuration system
+        return load_config_new("all")
+    else:
+        # Use legacy JSON configuration system
+        return load_config_legacy(file_path)
 
 def ensure_directory_exists(path: str):
     """

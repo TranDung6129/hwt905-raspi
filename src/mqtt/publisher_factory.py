@@ -19,7 +19,7 @@ def get_publisher() -> Optional[BasePublisher]:
         Optional[BasePublisher]: Một instance của publisher hoặc None nếu có lỗi.
     """
     try:
-        app_config = load_config('config/app_config.json')
+        app_config = load_config()  # Sử dụng hệ thống cấu hình mới
         mqtt_config = app_config.get('mqtt', {})
         strategy_config = mqtt_config.get('send_strategy', {})
         strategy_type = strategy_config.get('type', 'realtime') # Mặc định là realtime
@@ -34,12 +34,6 @@ def get_publisher() -> Optional[BasePublisher]:
             logger.error(f"Chiến lược gửi MQTT không hợp lệ: '{strategy_type}'. Vui lòng chọn 'realtime' hoặc 'batch'.")
             return None
             
-    except FileNotFoundError:
-        logger.error("Không tìm thấy file cấu hình app_config.json.")
-        return None
-    except KeyError as e:
-        logger.error(f"Thiếu khóa cấu hình cần thiết cho MQTT: {e}")
-        return None
     except Exception as e:
-        logger.error(f"Lỗi không xác định khi khởi tạo publisher: {e}")
+        logger.error(f"Lỗi khi khởi tạo publisher: {e}")
         return None 

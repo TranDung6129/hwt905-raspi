@@ -11,9 +11,9 @@ class CustomColoredFormatter(colorlog.ColoredFormatter):
     """
     def format(self, record):
         # Định dạng cho INFO và DEBUG (chỉ tô màu level)
-        info_fmt = "%(asctime)s - %(name)s - [%(log_color)s%(levelname)s%(reset)s] - %(message)s"
+        info_fmt = "%(asctime)s - [%(log_color)s%(levelname)s%(reset)s]\t - %(name)s - %(message)s"
         # Định dạng cho WARNING và cao hơn (tô màu cả dòng)
-        warn_fmt = "%(log_color)s%(asctime)s - %(name)s - [%(levelname)s] - %(message)s"
+        warn_fmt = "%(log_color)s%(asctime)s - [%(levelname)s]\t - %(name)s - %(message)s"
 
         # Thay đổi định dạng tạm thời dựa trên level
         if record.levelno >= logging.WARNING:
@@ -47,7 +47,7 @@ def setup_logging(log_file_path: str, log_level: str, max_bytes: int = 10485760,
 
     # Định dạng cho file log (không màu, không căn chỉnh)
     file_formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - [%(levelname)s] - %(message)s',
+        '%(asctime)s - [%(levelname)s]\t - %(name)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
 
@@ -102,7 +102,7 @@ def setup_logger(log_level: int = logging.INFO, name: str = None):
     
     # Tạo formatter
     formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        '%(asctime)s - [%(levelname)s]\t - %(name)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
     

@@ -1,0 +1,83 @@
+mqtt:
+  # Cấu hình broker MQTT
+  broker:
+    address: "localhost"
+    port: 1883
+    keepalive: 60
+    
+  # Cấu hình kết nối client
+  client:
+    id: "rpi_hwt905_backend_client"
+    clean_session: true
+    protocol_version: 4  # MQTT 3.1.1
+    
+  # Cấu hình authentication
+  auth:
+    use_tls: false
+    username: ""
+    password: ""
+    ca_certs: ""
+    certfile: ""
+    keyfile: ""
+    
+  # Cấu hình topics
+  topics:
+    publish_data: "sensor/hwt905/processed_data"
+    subscribe_commands: "sensor/hwt905/commands"
+    publish_status: "sensor/hwt905/status"
+    publish_response: "sensor/hwt905/config_response"
+    
+  # Cấu hình QoS
+  qos:
+    publish_data: 0
+    subscribe_commands: 1
+    publish_status: 0
+    publish_response: 1
+    
+  # Cấu hình chiến lược gửi dữ liệu
+  send_strategy:
+    type: "realtime"  # realtime, batch, batch_average
+    batch_size: 100
+    batch_timeout: 5.0  # seconds
+    
+  # Cấu hình retain messages
+  retain:
+    status: true
+    data: false
+    response: false
+    
+  # Cấu hình reconnection
+  reconnect:
+    enabled: true
+    delay: 5  # seconds
+    max_retries: 10
+    backoff_factor: 2.0
+    
+  # Cấu hình will message
+  will:
+    enabled: true
+    topic: "sensor/hwt905/status"
+    message: '{"status": "offline", "timestamp": null}'
+    qos: 1
+    retain: true
+    
+  # Cấu hình heartbeat
+  heartbeat:
+    enabled: true
+    interval: 30  # seconds
+    topic: "sensor/hwt905/heartbeat"
+    message: '{"status": "alive", "timestamp": null}'
+    
+  # Cấu hình message format
+  message_format:
+    timestamp_format: "iso"  # iso, unix, epoch
+    encoding: "utf-8"
+    compression: false
+    
+  # Cấu hình logging cho MQTT
+  logging:
+    enabled: true
+    log_connection: true
+    log_publish: false
+    log_subscribe: true
+    log_messages: false 

@@ -77,7 +77,7 @@ class BasePublisher:
         from src.processing.data_compressor import DataCompressor
         from src.utils.common import load_config
         
-        app_config = load_config('config/app_config.json')
+        app_config = load_config() 
         compression_config = app_config.get('data_compression', {})
         if compression_config:
             return DataCompressor(

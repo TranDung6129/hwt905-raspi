@@ -18,8 +18,9 @@ class BatchPublisher(BasePublisher):
         self.batch_size = config.get("send_strategy", {}).get("batch_size", 100)
         self.buffer: List[Dict[str, Any]] = []
         self.compressor = self.get_compressor()
-        message_config = load_config('config/mqtt_message_config.json')
-        self.message_template = message_config['message_templates']['batch']['structure']
+        app_config = load_config()  # Sử dụng hệ thống cấu hình mới
+        message_config = app_config.get('mqtt_message', {})
+        self.message_template = message_config.get('message_templates', {}).get('batch', {}).get('structure', {})
         
         # Throttling cho warning về unpublished messages
         self._last_warning_time = 0
