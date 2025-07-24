@@ -1,0 +1,24 @@
+[Unit]
+Description=HWT905 Raspberry Pi IMU Data Processing Service (Batch Mode)
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+User=trandung
+Group=trandung
+WorkingDirectory=/home/trandung/Data/Aitogy Projects/hwt905-raspi
+Environment=PYTHONPATH=/home/trandung/Data/Aitogy Projects/hwt905-raspi
+ExecStart=/usr/bin/python3 /home/trandung/Data/Aitogy Projects/hwt905-raspi/main.py --mode batch
+StandardOutput=journal
+StandardError=journal
+
+# Graceful shutdown
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

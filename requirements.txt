@@ -3,9 +3,6 @@ pyserial==3.5
 paho-mqtt==1.6.1
 msgpack==1.0.8
 scipy==1.12.0
-pyserial
-paho-mqtt
-numpy
 colorlog
 PyYAML==6.0.1
 python-dotenv==1.0.0

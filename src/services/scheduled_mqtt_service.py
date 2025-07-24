@@ -1,306 +1,195 @@
+# src/services/scheduled_mqtt_service.py
 import logging
 import threading
 import time
-import json
 import os
-from datetime import datetime
-from typing import Optional, Dict, Any, List
-from queue import Queue, Empty
+import glob
+from typing import Dict, Any
+from src.mqtt.publisher_factory import get_publisher
+from src.mqtt.batch_publisher import BatchPublisher
+from src.utils.common import load_config
+import json
 import pandas as pd
 
-from ..mqtt.base_publisher import BasePublisher
-from ..utils.common import load_config
-
+logger = logging.getLogger(__name__)
 
 class ScheduledMqttService:
-    """Service để gửi dữ liệu định kỳ từ storage lên MQTT"""
+    """
+    Service gửi dữ liệu MQTT theo lịch trình định kỳ.
+    Đọc dữ liệu đã lưu trong thư mục và gửi đi theo batch.
+    """
     
     def __init__(self, config: Dict[str, Any]):
         self.config = config
-        self.logger = logging.getLogger(__name__)
+        self.interval_seconds = config.get('interval_seconds', 60)
+        self.data_source_dir = config.get('data_source_dir', 'data/processed_data')
+        self.batch_size = config.get('batch_size', 100)
+        self.delete_after_send = config.get('delete_after_send', False)
+        self.topic = config.get('topic', 'sensor/scheduled_data')
+        
         self.running = False
-        self.thread: Optional[threading.Thread] = None
-        self.mqtt_client: Optional[BasePublisher] = None
+        self.thread = None
+        self.publisher = None
         
-        # Cấu hình từ config
-        self.enabled = config.get("enabled", False)
-        self.interval_seconds = config.get("interval_seconds", 60)  # Mặc định 60 giây
-        self.data_source_dir = config.get("data_source_dir", "data/processed_data")
-        self.batch_size = config.get("batch_size", 100)  # Số record gửi mỗi lần
-        self.delete_after_send = config.get("delete_after_send", False)
-        self.mqtt_topic = config.get("mqtt_topic", "sensor/batch_data")
+        logger.info(f"Scheduled MQTT Service initialized:")
+        logger.info(f"  Interval: {self.interval_seconds}s")
+        logger.info(f"  Data source: {self.data_source_dir}")
+        logger.info(f"  Batch size: {self.batch_size}")
+        logger.info(f"  Delete after send: {self.delete_after_send}")
         
-        # Theo dõi file đã xử lý
-        self.processed_files = set()
-        self.last_processed_timestamp = None
-        
-        self.logger.info(f"ScheduledMqttService initialized: enabled={self.enabled}, interval={self.interval_seconds}s")
-    
     def start(self):
         """Khởi động service"""
-        if not self.enabled:
-            self.logger.info("ScheduledMqttService is disabled")
-            return
-        
         if self.running:
-            self.logger.warning("ScheduledMqttService is already running")
+            logger.warning("Scheduled MQTT Service đã đang chạy")
             return
-        
-        self.logger.info("Starting ScheduledMqttService...")
+            
+        logger.info("Khởi động Scheduled MQTT Service...")
         self.running = True
-        
-        # Khởi tạo MQTT client
-        try:
-            mqtt_config = load_config().get("mqtt", {})
-            self.mqtt_client = BasePublisher(mqtt_config)
-            self.mqtt_client.connect()
-            self.logger.info("MQTT client connected for scheduled service")
-        except Exception as e:
-            self.logger.error(f"Failed to connect MQTT client: {e}")
-            self.running = False
-            return
-        
-        # Khởi động thread
-        self.thread = threading.Thread(target=self._run, name="ScheduledMqttService")
-        self.thread.daemon = True
+        self.thread = threading.Thread(target=self._run_loop, daemon=True)
         self.thread.start()
         
-        self.logger.info("ScheduledMqttService started successfully")
-    
     def stop(self):
         """Dừng service"""
-        if not self.running:
-            return
-        
-        self.logger.info("Stopping ScheduledMqttService...")
+        logger.info("Dừng Scheduled MQTT Service...")
         self.running = False
         
         if self.thread and self.thread.is_alive():
             self.thread.join(timeout=5)
-            if self.thread.is_alive():
-                self.logger.warning("ScheduledMqttService thread did not stop within timeout")
+            
+        if self.publisher:
+            self.publisher.disconnect()
+            
+        logger.info("Scheduled MQTT Service đã dừng")
         
-        if self.mqtt_client:
-            try:
-                self.mqtt_client.disconnect()
-                self.logger.info("MQTT client disconnected")
-            except Exception as e:
-                self.logger.error(f"Error disconnecting MQTT client: {e}")
-        
-        self.logger.info("ScheduledMqttService stopped")
-    
-    def _run(self):
+    def _run_loop(self):
         """Vòng lặp chính của service"""
-        self.logger.info("ScheduledMqttService main loop started")
+        logger.info("Scheduled MQTT Service thread đã bắt đầu")
         
+        # Khởi tạo publisher
+        try:
+            app_config = load_config()
+            mqtt_config = app_config.get('mqtt', {})
+            # Tạo BatchPublisher để gửi dữ liệu theo batch
+            self.publisher = BatchPublisher(config=mqtt_config)
+            self.publisher.connect()
+            logger.info("Đã kết nối tới MQTT broker")
+        except Exception as e:
+            logger.error(f"Không thể khởi tạo publisher: {e}")
+            return
+            
         while self.running:
             try:
-                # Gửi dữ liệu
-                self._send_batch_data()
-                
-                # Đợi interval
-                for _ in range(self.interval_seconds):
-                    if not self.running:
-                        break
-                    time.sleep(1)
-                        
+                self._process_data_files()
+                time.sleep(self.interval_seconds)
             except Exception as e:
-                self.logger.error(f"Error in ScheduledMqttService main loop: {e}", exc_info=True)
-                time.sleep(5)  # Đợi 5 giây trước khi thử lại
-        
-        self.logger.info("ScheduledMqttService main loop ended")
-    
-    def _send_batch_data(self):
-        """Gửi dữ liệu batch lên MQTT"""
-        try:
-            # Tìm và xử lý các file dữ liệu
-            data_files = self._find_new_data_files()
-            
-            if not data_files:
-                self.logger.debug("No new data files to process")
-                return
-            
-            self.logger.info(f"Found {len(data_files)} new data files to process")
-            
-            for file_path in data_files:
-                if not self.running:
-                    break
+                logger.error(f"Lỗi trong vòng lặp scheduled service: {e}")
+                time.sleep(5)  # Ngủ ngắn trước khi thử lại
                 
-                try:
-                    self._process_data_file(file_path)
-                except Exception as e:
-                    self.logger.error(f"Error processing file {file_path}: {e}", exc_info=True)
-                    
-        except Exception as e:
-            self.logger.error(f"Error in _send_batch_data: {e}", exc_info=True)
-    
-    def _find_new_data_files(self) -> List[str]:
-        """Tìm các file dữ liệu mới cần xử lý"""
+    def _process_data_files(self):
+        """Xử lý các file dữ liệu trong thư mục"""
         if not os.path.exists(self.data_source_dir):
-            self.logger.warning(f"Data source directory does not exist: {self.data_source_dir}")
-            return []
-        
-        new_files = []
-        
-        try:
-            for filename in os.listdir(self.data_source_dir):
-                if filename.endswith('.csv') and filename not in self.processed_files:
-                    file_path = os.path.join(self.data_source_dir, filename)
-                    
-                    # Kiểm tra xem file có được tạo sau lần xử lý cuối không
-                    if self.last_processed_timestamp:
-                        file_mtime = os.path.getmtime(file_path)
-                        if file_mtime <= self.last_processed_timestamp:
-                            continue
-                    
-                    new_files.append(file_path)
+            logger.warning(f"Thư mục dữ liệu không tồn tại: {self.data_source_dir}")
+            return
             
-            # Sắp xếp theo thời gian tạo file (cũ nhất trước)
-            new_files.sort(key=lambda x: os.path.getmtime(x))
-            
-        except Exception as e:
-            self.logger.error(f"Error finding new data files: {e}", exc_info=True)
+        # Tìm tất cả file CSV trong thư mục
+        csv_files = glob.glob(os.path.join(self.data_source_dir, "*.csv"))
         
-        return new_files
-    
-    def _process_data_file(self, file_path: str):
+        if not csv_files:
+            logger.debug("Không có file dữ liệu để gửi")
+            return
+            
+        logger.info(f"Tìm thấy {len(csv_files)} file dữ liệu để xử lý")
+        
+        for file_path in csv_files:
+            try:
+                self._process_single_file(file_path)
+            except Exception as e:
+                logger.error(f"Lỗi khi xử lý file {file_path}: {e}")
+                
+    def _process_single_file(self, file_path: str):
         """Xử lý một file dữ liệu"""
+        logger.info(f"Xử lý file: {file_path}")
+        
         try:
-            self.logger.info(f"Processing data file: {file_path}")
-            
             # Đọc dữ liệu từ file CSV
             df = pd.read_csv(file_path)
             
             if df.empty:
-                self.logger.warning(f"Data file is empty: {file_path}")
-                self._mark_file_as_processed(file_path)
-                return
-            
-            # Chia dữ liệu thành các batch
-            total_records = len(df)
-            self.logger.info(f"File {file_path} contains {total_records} records")
-            
-            batch_count = 0
-            for i in range(0, total_records, self.batch_size):
-                if not self.running:
-                    break
-                
-                batch_df = df.iloc[i:i + self.batch_size]
-                batch_data = self._prepare_batch_data(batch_df, file_path, batch_count)
-                
-                # Gửi batch lên MQTT
-                success = self._send_mqtt_batch(batch_data)
-                
-                if success:
-                    batch_count += 1
-                    self.logger.debug(f"Sent batch {batch_count} from {file_path} ({len(batch_df)} records)")
-                else:
-                    self.logger.error(f"Failed to send batch {batch_count} from {file_path}")
-                    return  # Dừng xử lý file này nếu gửi thất bại
-            
-            # Đánh dấu file đã xử lý
-            self._mark_file_as_processed(file_path)
-            
-            # Xóa file nếu được cấu hình
-            if self.delete_after_send:
-                try:
+                logger.warning(f"File {file_path} rỗng")
+                if self.delete_after_send:
                     os.remove(file_path)
-                    self.logger.info(f"Deleted processed file: {file_path}")
-                except Exception as e:
-                    self.logger.error(f"Error deleting file {file_path}: {e}")
+                return
+                
+            # Chuyển đổi dữ liệu thành format JSON
+            data_points = []
+            for _, row in df.iterrows():
+                data_point = row.to_dict()
+                # Xử lý NaN values
+                for key, value in data_point.items():
+                    if pd.isna(value):
+                        data_point[key] = None
+                data_points.append(data_point)
+                
+            # Gửi dữ liệu theo batch
+            total_points = len(data_points)
+            sent_count = 0
             
-            self.logger.info(f"Successfully processed file {file_path} ({batch_count} batches sent)")
+            for i in range(0, total_points, self.batch_size):
+                batch = data_points[i:i + self.batch_size]
+                
+                # Tạo message theo format batch
+                message = {
+                    'metadata': {
+                        'device_id': 'hwt905-raspi',
+                        'message_type': 'scheduled_batch',
+                        'timestamp': int(time.time()),
+                        'file_source': os.path.basename(file_path),
+                        'batch_info': {
+                            'batch_number': i // self.batch_size + 1,
+                            'total_batches': (total_points + self.batch_size - 1) // self.batch_size,
+                            'points_in_batch': len(batch)
+                        }
+                    },
+                    'data_points': batch
+                }
+                
+                # Gửi batch
+                if self.publisher:
+                    payload = json.dumps(message).encode('utf-8')
+                    self.publisher.client.publish(self.topic, payload)
+                    sent_count += len(batch)
+                    
+            logger.info(f"Đã gửi {sent_count}/{total_points} điểm dữ liệu từ {file_path}")
             
-        except Exception as e:
-            self.logger.error(f"Error processing data file {file_path}: {e}", exc_info=True)
-    
-    def _prepare_batch_data(self, df: pd.DataFrame, file_path: str, batch_index: int) -> Dict[str, Any]:
-        """Chuẩn bị dữ liệu batch để gửi"""
-        # Chuyển DataFrame thành list of dictionaries
-        records = df.to_dict('records')
-        
-        # Tạo metadata
-        metadata = {
-            "source_file": os.path.basename(file_path),
-            "batch_index": batch_index,
-            "record_count": len(records),
-            "timestamp": datetime.now().isoformat(),
-            "data_type": "processed_batch"
-        }
-        
-        # Tạo payload
-        batch_data = {
-            "metadata": metadata,
-            "data": records
-        }
-        
-        return batch_data
-    
-    def _send_mqtt_batch(self, batch_data: Dict[str, Any]) -> bool:
-        """Gửi batch data lên MQTT"""
-        try:
-            if not self.mqtt_client or not self.mqtt_client.client.is_connected():
-                self.logger.error("MQTT client is not connected")
-                return False
-            
-            # Chuyển thành JSON
-            json_payload = json.dumps(batch_data, ensure_ascii=False)
-            
-            # Gửi lên MQTT
-            result = self.mqtt_client.client.publish(
-                self.mqtt_topic,
-                json_payload,
-                qos=1  # Đảm bảo tin nhắn được gửi
-            )
-            
-            if result.rc == 0:
-                self.logger.debug(f"Successfully sent batch to MQTT topic: {self.mqtt_topic}")
-                return True
-            else:
-                self.logger.error(f"Failed to send batch to MQTT: {result.rc}")
-                return False
+            # Xóa file sau khi gửi thành công (nếu được cấu hình)
+            if self.delete_after_send:
+                os.remove(file_path)
+                logger.info(f"Đã xóa file {file_path}")
                 
         except Exception as e:
-            self.logger.error(f"Error sending MQTT batch: {e}", exc_info=True)
-            return False
-    
-    def _mark_file_as_processed(self, file_path: str):
-        """Đánh dấu file đã được xử lý"""
-        filename = os.path.basename(file_path)
-        self.processed_files.add(filename)
-        self.last_processed_timestamp = time.time()
-        self.logger.debug(f"Marked file as processed: {filename}")
+            logger.error(f"Lỗi khi xử lý file {file_path}: {e}")
+            raise
 
 
 class ScheduledMqttServiceManager:
     """Manager để quản lý ScheduledMqttService"""
     
     def __init__(self):
-        self.service: Optional[ScheduledMqttService] = None
-        self.logger = logging.getLogger(__name__)
-    
+        self.service = None
+        
     def initialize(self, config: Dict[str, Any]):
-        """Khởi tạo service với cấu hình"""
-        try:
-            self.service = ScheduledMqttService(config)
-            self.logger.info("ScheduledMqttServiceManager initialized")
-        except Exception as e:
-            self.logger.error(f"Failed to initialize ScheduledMqttServiceManager: {e}")
-            raise
-    
+        """Khởi tạo service với config"""
+        self.service = ScheduledMqttService(config)
+        
     def start(self):
         """Khởi động service"""
         if self.service:
             self.service.start()
-        else:
-            self.logger.warning("ScheduledMqttService not initialized")
-    
+            
     def stop(self):
         """Dừng service"""
         if self.service:
             self.service.stop()
-        else:
-            self.logger.warning("ScheduledMqttService not initialized")
 
 
 # Global instance

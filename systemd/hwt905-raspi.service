@@ -11,7 +11,12 @@ User=trandung
 Group=trandung
 WorkingDirectory=/home/trandung/Data/Aitogy Projects/hwt905-raspi
 Environment=PYTHONPATH=/home/trandung/Data/Aitogy Projects/hwt905-raspi
-ExecStart=/usr/bin/python3 /home/trandung/Data/Aitogy Projects/hwt905-raspi/main.py
+# Mặc định chạy ở chế độ realtime
+# Để thay đổi chế độ, sửa dòng ExecStart bên dưới:
+# --mode realtime: gửi dữ liệu ngay lập tức
+# --mode batch: gửi dữ liệu theo batch
+# --mode scheduled: gửi dữ liệu theo lịch trình
+ExecStart=/usr/bin/python3 /home/trandung/Data/Aitogy Projects/hwt905-raspi/main.py --mode realtime
 StandardOutput=journal
 StandardError=journal
 

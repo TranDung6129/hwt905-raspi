@@ -131,6 +131,24 @@
         },
         "data_averaged": {}
       }
+    },
+    "scheduled": {
+      "structure": {
+        "metadata": {
+          "source": "HWT905_RasPi",
+          "strategy": "scheduled",
+          "sample_count": 0,
+          "start_time": 0.0,
+          "end_time": 0.0,
+          "file_source": "",
+          "batch_info": {
+            "batch_number": 0,
+            "total_batches": 0,
+            "points_in_batch": 0
+          }
+        },
+        "data_points": []
+      }
     }
   }
 }

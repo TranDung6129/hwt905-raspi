@@ -1,0 +1,45 @@
+# Ignore systemd file
+systemd/
+
+# Ignore Dockerfile
+Dockerfile
+
+# Ignore Docker Compose file
+docker-compose.yml
+
+# Ignore data and logs
+data/
+logs/
+
+# Ignore config directoreies
+config/
+
+# Ignore scripts
+scripts/
+
+# Ignore python cache files
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Ignore IDE files
+.idea/
+.vscode/
+
+# Ignore git files
+.git/
+.gitignore
+/github/workflows/
+
+# Ignore README files
+README.md
+CHANGELOG.md
+
+

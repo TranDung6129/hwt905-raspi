@@ -150,6 +150,87 @@ nano config/mqtt_message_config.json
 
 ## Usage
 
+### Operating Modes
+
+The system supports three operating modes for different deployment scenarios:
+
+#### 1. Realtime Mode (Default)
+Gửi dữ liệu ngay lập tức khi được xử lý:
+```bash
+# Chạy trực tiếp
+python main.py --mode realtime
+
+# Hoặc sử dụng các option bổ sung
+python main.py --mode realtime --debug
+```
+
+#### 2. Batch Mode
+Thu thập dữ liệu và gửi theo batch để tối ưu hóa băng thông:
+```bash
+# Chạy với batch size mặc định
+python main.py --mode batch
+
+# Tùy chỉnh batch size
+python main.py --mode batch --batch-size 50
+```
+
+#### 3. Scheduled Mode
+Gửi dữ liệu theo lịch trình định kỳ (thích hợp cho môi trường mạng không ổn định):
+```bash
+# Chạy với interval mặc định (60s)
+python main.py --mode scheduled
+
+# Tùy chỉnh interval
+python main.py --mode scheduled --schedule-interval 120
+```
+
+### Command Line Options
+
+```bash
+# Tắt các chức năng cụ thể
+python main.py --no-decode    # Tắt giải mã dữ liệu
+python main.py --no-process   # Tắt xử lý dữ liệu
+python main.py --no-mqtt      # Tắt gửi MQTT
+python main.py --no-storage   # Tắt lưu trữ dữ liệu
+
+# Kết hợp các option
+python main.py --mode batch --batch-size 100 --debug --no-storage
+```
+
+### SystemD Service Deployment
+
+#### Cài đặt Service
+
+```bash
+# Chạy script cài đặt tương tác
+sudo ./scripts/install.sh
+
+# Hoặc cài đặt trực tiếp cho chế độ cụ thể
+sudo cp systemd/hwt905-raspi.service /etc/systemd/system/          # Realtime mode
+sudo cp systemd/hwt905-raspi-batch.service /etc/systemd/system/    # Batch mode
+sudo cp systemd/hwt905-raspi-scheduled.service /etc/systemd/system/ # Scheduled mode
+
+sudo systemctl daemon-reload
+```
+
+#### Quản lý Service
+
+```bash
+# Khởi động service
+sudo systemctl start hwt905-raspi                # Realtime mode
+sudo systemctl start hwt905-raspi-batch          # Batch mode
+sudo systemctl start hwt905-raspi-scheduled      # Scheduled mode
+
+# Bật tự động khởi động cùng hệ thống
+sudo systemctl enable hwt905-raspi
+
+# Kiểm tra trạng thái
+sudo systemctl status hwt905-raspi
+
+# Xem log
+sudo journalctl -u hwt905-raspi -f
+```
+
 ### Basic Operation
 
 ```bash
@@ -159,11 +240,11 @@ source venv/bin/activate
 # Run the main application using startup script
 scripts/run_app.sh
 
-# Or run directly
-python main.py
+# Or run directly with mode selection
+python main.py --mode realtime
 
 # Run with debug logging
-python main.py --log-level DEBUG
+python main.py --mode batch --debug
 ```
 
 ### Sensor Configuration

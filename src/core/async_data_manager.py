@@ -13,6 +13,7 @@ from ..processing.data_processor import SensorDataProcessor
 from ..sensors.hwt905_constants import PACKET_TYPE_ACC
 from ..mqtt.publisher_factory import get_publisher
 from ..mqtt.batch_publisher import BatchPublisher
+from ..mqtt.scheduled_publisher import ScheduledPublisher
 from ..core.connection_manager import SensorConnectionManager
 
 logger = logging.getLogger(__name__)
@@ -308,11 +309,12 @@ class MqttPublisherThread(threading.Thread):
     """
     Luồng chuyên lấy dữ liệu đã xử lý từ hàng đợi và gửi qua MQTT.
     """
-    def __init__(self, mqtt_queue: Queue, running_flag: threading.Event):
+    def __init__(self, mqtt_queue: Queue, running_flag: threading.Event, mode: str = "continuous"):
         super().__init__(daemon=True, name="MqttPublisherThread")
         self.mqtt_queue = mqtt_queue
         self.running_flag = running_flag
-        self.publisher = get_publisher()
+        self.mode = mode
+        self.publisher = get_publisher(mode=mode)
         self.sent_packet_count = 0
         self.last_log_time = time.time()
 
@@ -355,6 +357,9 @@ class MqttPublisherThread(threading.Thread):
         # Gửi nốt dữ liệu còn lại trong buffer (nếu là batch mode)
         if isinstance(self.publisher, BatchPublisher):
             self.publisher.flush()
+        
+        # Disconnect publisher
+        if self.publisher:
+            self.publisher.disconnect()
             
-        self.publisher.disconnect()
         logger.info("Luồng MQTT Publisher đã dừng.")
