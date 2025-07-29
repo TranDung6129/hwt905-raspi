@@ -199,7 +199,7 @@ def main():
 
     # 6. Thiết lập pipeline với các hàng đợi
     raw_data_queue = Queue(maxsize=8192)
-    decoded_data_queue = Queue(maxsize=8192) if processing_enabled else None
+    decoded_data_queue = Queue(maxsize=8192)
     # Tạo mqtt_queue cho continuous, batch, và scheduled mode
     mqtt_queue = Queue(maxsize=8192) if mqtt_sending_enabled else None
 

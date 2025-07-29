@@ -22,10 +22,10 @@ mqtt:
     
   # Cấu hình topics
   topics:
-    publish_data: "sensor1/hwt905/processed_data"
-    subscribe_commands: "sensor1/hwt905/commands"
-    publish_status: "sensor1/hwt905/status"
-    publish_response: "sensor1/hwt905/config_response"
+    publish_data: "sensor/hwt905/processed_data"
+    subscribe_commands: "sensor/hwt905/commands"
+    publish_status: "sensor/hwt905/status"
+    publish_response: "sensor/hwt905/config_response"
     
   # Cấu hình QoS
   qos:

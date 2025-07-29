@@ -1,6 +1,7 @@
 numpy==1.26.4
 pyserial==3.5
 paho-mqtt==1.6.1
+prometheus-client
 msgpack==1.0.8
 scipy==1.12.0
 colorlog
@@ -8,3 +9,7 @@ PyYAML==6.0.1
 python-dotenv==1.0.0
 APScheduler==3.10.4
 pandas==2.0.3
+influxdb-client[ciso]>=1.39.0
+joblib==1.3.2
+scikit-learn==1.4.2
+requests==2.31.0

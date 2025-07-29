@@ -1,756 +1,705 @@
-# HWT905 RaspberryPi Sensor Data Processing System
+# HWT905 IoT AI Pipeline
 
-## Overview
+## Tổng quan
 
-This is a comprehensive embedded sensor data processing system designed specifically for **Raspberry Pi** environments. The system processes acceleration data from **HWT905** 9-axis IMU sensors, performs real-time signal processing, and transmits data via **MQTT** with robust storage capabilities for intermittent connectivity scenarios.
+HWT905 IoT AI Pipeline là một hệ thống IoT hoàn chỉnh được thiết kế để thu thập, xử lý, lưu trữ và phân tích dữ liệu cảm biến từ thiết bị HWT905 IMU. Hệ thống tích hợp AI/ML để huấn luyện mô hình, triển khai edge inference và giám sát toàn diện với Prometheus và Grafana.
 
-### Key Features
+## Kiến trúc hệ thống
 
-- **Real-time Sensor Data Processing**: Handles HWT905 9-axis IMU data at up to 200Hz sampling rate
-- **Advanced Signal Processing**: RLS (Recursive Least Squares) integration and FFT analysis
-- **Robust Storage System**: Local data storage with configurable formats (CSV/JSON) for offline operation
-- **MQTT Connectivity**: Real-time data transmission with automatic reconnection
-- **Auto-Reconnection**: Intelligent sensor connection recovery with automatic thread management
-- **Intermittent Connectivity Support**: Batch transmission capabilities for unstable network environments
-- **Remote Configuration**: Standalone MQTT service for field-configurable sensor parameters
-- **Embedded-Optimized**: Designed for resource-constrained environments like Raspberry Pi
-
-## System Architecture
+### Sơ đồ kiến trúc
 
 ```
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   HWT905 IMU    │────│  Data Processor  │────│  Storage System │
-│   (UART/USB)    │    │  - RLS Filter    │    │  - CSV/JSON     │
-└─────────────────┘    │  - FFT Analysis  │    │  - Batch Ready  │
-                       │  - Real-time     │    └─────────────────┘
-                                  │                     │
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   MQTT Broker   │────│   MQTT Client    │────│  Data Transmit  │
-│  (External)     │    │  - Auto Retry    │    │  - Immediate    │
-└─────────────────┘    │  - TLS Support   │    │  - Batch Mode   │
-                       └──────────────────┘    └─────────────────┘
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Raspberry Pi  │    │   Gateway       │    │   InfluxDB      │
+│   (HWT905 IMU)  │───▶│   Service       │───▶│   Database      │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+                                │                        │
+                                ▼                        ▼
+                       ┌─────────────────┐    ┌─────────────────┐
+                       │   MQTT Broker   │    │    Grafana      │
+                       │   (Mosquitto)   │    │   Dashboard     │
+                       └─────────────────┘    └─────────────────┘
+                                │                        │
+                                ▼                        ▼
+                       ┌─────────────────┐    ┌─────────────────┐
+                       │   AI Training   │    │   Prometheus    │
+                       │   & Inference   │    │   Monitoring    │
+                       └─────────────────┘    └─────────────────┘
 ```
 
-## Hardware Requirements
+### Các thành phần chính
 
-### Minimum Requirements
-- **Raspberry Pi 3B+** or newer
-- **8GB microSD card** (Class 10 or better)
-- **HWT905 9-axis IMU sensor**
-- **Stable 5V 2.5A power supply**
+#### 1. **Raspberry Pi với HWT905 IMU**
+- **Chức năng**: Thu thập dữ liệu gia tốc và góc quay từ cảm biến IMU
+- **Giao tiếp**: Serial communication qua USB/UART
+- **Dữ liệu**: acceleration_x/y/z, angular_velocity_x/y/z, displacement_x/y/z
+- **Tần suất**: Configurable (mặc định 100Hz)
 
-### Recommended for Production
-- **Raspberry Pi 4B** (4GB RAM)
-- **32GB microSD card** (Application Class 2)
-- **Ethernet connection** (for stable MQTT connectivity)
-- **Real-time clock module** (RTC) for accurate timestamps
+#### 2. **MQTT Broker (Mosquitto)**
+- **Chức năng**: Message broker cho communication giữa các component
+- **Topics chính**:
+  - `sensor/hwt905/processed_data`: Dữ liệu cảm biến đã xử lý
+  - `sensor/hwt905/model_update`: Cập nhật mô hình AI
+- **Port**: 1883 (MQTT), 9001 (WebSocket)
 
-### Sensor Connection
-- **UART Connection**: Connect HWT905 to Pi's GPIO pins
-  - `VCC` → `5V` (Pin 2)
-  - `GND` → `GND` (Pin 6)
-  - `TX` → `RX` (GPIO 15, Pin 10)
-  - `RX` → `TX` (GPIO 14, Pin 8)
-- **USB Connection**: Use HWT905 USB adapter (plug-and-play)
+#### 3. **Gateway Service**
+- **Chức năng**: Xử lý trung tâm, nhận dữ liệu từ MQTT và ghi vào InfluxDB
+- **Tính năng**:
+  - Xử lý và validate dữ liệu MQTT
+  - Ghi dữ liệu vào InfluxDB
+  - Chia sẻ mô hình AI qua MQTT
+  - Expose Prometheus metrics
+- **Metrics**: `gateway_mqtt_messages_processed_total`, `gateway_influxdb_points_written_total`
 
-## Installation
+#### 4. **InfluxDB**
+- **Chức năng**: Time-series database để lưu trữ dữ liệu cảm biến
+- **Schema**: 
+  - Measurement: `sensor_data`
+  - Tags: `device_id`, `strategy`
+  - Fields: `disp_x`, `disp_y`, `disp_z`, etc.
+- **Port**: 8086
 
-### 1. System Prerequisites
+#### 5. **Grafana**
+- **Chức năng**: Visualization và dashboard cho dữ liệu
+- **Datasources**: InfluxDB, Prometheus
+- **Port**: 3000
+- **Default login**: admin/admin
+
+#### 6. **Prometheus + Node Exporter**
+- **Chức năng**: Monitoring và metrics collection
+- **Targets**: Gateway Service (port 8000), Node Exporter (port 9100)
+- **Port**: 9090 (Prometheus), 9100 (Node Exporter)
+
+#### 7. **AI Training & Inference**
+- **Chức năng**: Huấn luyện mô hình ML và thực hiện edge inference
+- **Algorithm**: RandomForestClassifier (có thể mở rộng)
+- **Features**: displacement_x, displacement_y, displacement_z
+- **Model sharing**: Qua MQTT và shared volume
+
+```
+hwt905-raspi/
+├── docker-compose.yml           # Orchestration chính
+├── services/                    # Microservices
+│   └── gateway/                 # Gateway Service
+│       ├── Dockerfile
+│       ├── gateway_service.py
+│       └── requirements.txt
+├── scripts/                     # Standalone scripts
+│   ├── main.py                  # Script chính cho Raspberry Pi
+│   ├── train_model.py           # Script huấn luyện AI
+│   └── edge_inference.py        # Script edge inference
+├── config/                      # Configuration files
+│   └── prometheus/
+│       └── prometheus.yml
+├── shared_models/               # Shared AI models
+│   └── latest_model.joblib
+├── gateway_data/                # Persistent data
+│   ├── influxdb/
+│   ├── grafana/
+│   ├── mosquitto/
+│   └── prometheus/
+└── README.md
+```
+
+## Cài đặt và Triển khai
+
+### Yêu cầu hệ thống
+
+- **Docker**: >= 20.10
+- **Docker Compose**: >= 2.0
+- **RAM**: >= 4GB (khuyến nghị 8GB)
+- **Storage**: >= 10GB free space
+- **OS**: Linux (Ubuntu 20.04+), macOS, Windows với WSL2
+
+### Bước 1: Clone repository
 
 ```bash
-# Update Raspberry Pi OS
-sudo apt update && sudo apt upgrade -y
-
-# Install Python 3.11+ and pip
-sudo apt install python3 python3-pip python3-venv git -y
-
-# Enable UART (for direct sensor connection)
-sudo raspi-config
-# Navigate to: Interface Options > Serial Port
-# Enable serial port, disable login shell over serial
-```
-
-### 2. Project Setup
-
-```bash
-# Clone the repository
 git clone <repository-url>
 cd hwt905-raspi
-
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Create necessary directories
-mkdir -p data/processed_data data/sensor_logs logs
 ```
 
-### 3. Configuration
-
-Copy and customize the configuration files:
+### Bước 2: Tạo thư mục dữ liệu
 
 ```bash
-# Review and modify sensor settings
-nano config/app_config.json
-
-# Configure MQTT broker settings
-nano config/mqtt_message_config.json
+mkdir -p gateway_data/{influxdb/{data,config},grafana/data,mosquitto/{config,data,log},prometheus/data}
 ```
 
-## Configuration
-
-### Main Configuration (`config/app_config.json`)
-
-```json
-{
-  "sensor": {
-    "uart_port": "/dev/ttyAMA0",
-    "baud_rate": 9600,
-    "default_output_rate_hz": 200
-  },
-  "processing": {
-    "dt_sensor_actual": 0.005,
-    "gravity_g": 9.81,
-    "rls_sample_frame_size": 20,
-    "fft_n_points": 512
-  },
-  "data_storage": {
-    "enabled": true,
-    "immediate_transmission": true,
-    "batch_transmission_size": 50,
-    "base_dir": "data/processed_data",
-    "format": "csv",
-    "max_file_size_mb": 10
-  },
-  "mqtt": {
-    "broker_address": "your-mqtt-broker.com",
-    "broker_port": 1883,
-    "client_id": "raspi-hwt905-001",
-    "use_tls": false
-  }
-}
-```
-
-### Key Configuration Options
-
-#### Storage System
-- **`enabled`**: Enable/disable local data storage
-- **`immediate_transmission`**: Send data immediately (true) or storage-only mode (false)
-- **`batch_transmission_size`**: Number of records per batch for offline transmission
-- **`format`**: Data storage format (`csv` or `json`)
-- **`max_file_size_mb`**: Maximum file size before rotation
-
-#### Sensor Processing
-- **`default_output_rate_hz`**: Sensor sampling rate (10, 50, 100, 200 Hz)
-- **`rls_sample_frame_size`**: RLS processing frame size (affects latency vs accuracy)
-- **`fft_n_points`**: FFT analysis resolution (512, 1024, 2048)
-
-## Usage
-
-### Operating Modes
-
-The system supports three operating modes for different deployment scenarios:
-
-#### 1. Realtime Mode (Default)
-Gửi dữ liệu ngay lập tức khi được xử lý:
-```bash
-# Chạy trực tiếp
-python main.py --mode realtime
-
-# Hoặc sử dụng các option bổ sung
-python main.py --mode realtime --debug
-```
-
-#### 2. Batch Mode
-Thu thập dữ liệu và gửi theo batch để tối ưu hóa băng thông:
-```bash
-# Chạy với batch size mặc định
-python main.py --mode batch
-
-# Tùy chỉnh batch size
-python main.py --mode batch --batch-size 50
-```
-
-#### 3. Scheduled Mode
-Gửi dữ liệu theo lịch trình định kỳ (thích hợp cho môi trường mạng không ổn định):
-```bash
-# Chạy với interval mặc định (60s)
-python main.py --mode scheduled
-
-# Tùy chỉnh interval
-python main.py --mode scheduled --schedule-interval 120
-```
-
-### Command Line Options
+### Bước 3: Cấu hình quyền (Linux/macOS)
 
 ```bash
-# Tắt các chức năng cụ thể
-python main.py --no-decode    # Tắt giải mã dữ liệu
-python main.py --no-process   # Tắt xử lý dữ liệu
-python main.py --no-mqtt      # Tắt gửi MQTT
-python main.py --no-storage   # Tắt lưu trữ dữ liệu
+# Cấu hình quyền cho InfluxDB
+sudo chown -R 1000:1000 gateway_data/influxdb
 
-# Kết hợp các option
-python main.py --mode batch --batch-size 100 --debug --no-storage
+# Cấu hình quyền cho Grafana
+sudo chown -R 472:472 gateway_data/grafana
+
+# Cấu hình quyền cho Prometheus
+sudo chown -R 65534:65534 gateway_data/prometheus
+
+# Cấu hình quyền cho shared models
+sudo chown -R 1000:1000 shared_models
 ```
 
-### SystemD Service Deployment
-
-#### Cài đặt Service
+### Bước 4: Khởi động hệ thống
 
 ```bash
-# Chạy script cài đặt tương tác
-sudo ./scripts/install.sh
-
-# Hoặc cài đặt trực tiếp cho chế độ cụ thể
-sudo cp systemd/hwt905-raspi.service /etc/systemd/system/          # Realtime mode
-sudo cp systemd/hwt905-raspi-batch.service /etc/systemd/system/    # Batch mode
-sudo cp systemd/hwt905-raspi-scheduled.service /etc/systemd/system/ # Scheduled mode
-
-sudo systemctl daemon-reload
-```
-
-#### Quản lý Service
-
-```bash
-# Khởi động service
-sudo systemctl start hwt905-raspi                # Realtime mode
-sudo systemctl start hwt905-raspi-batch          # Batch mode
-sudo systemctl start hwt905-raspi-scheduled      # Scheduled mode
-
-# Bật tự động khởi động cùng hệ thống
-sudo systemctl enable hwt905-raspi
+# Build và khởi động tất cả services
+docker compose up -d --build
 
 # Kiểm tra trạng thái
-sudo systemctl status hwt905-raspi
+docker compose ps
 
-# Xem log
-sudo journalctl -u hwt905-raspi -f
+# Xem logs
+docker compose logs -f
 ```
 
-### Basic Operation
+### Bước 5: Xác minh hoạt động
 
-```bash
-# Activate virtual environment
-source venv/bin/activate
+1. **InfluxDB**: http://localhost:8086
+2. **Grafana**: http://localhost:3000 (admin/admin)
+3. **Prometheus**: http://localhost:9090
+4. **MQTT**: localhost:1883
 
-# Run the main application using startup script
-scripts/run_app.sh
+## Cấu hình các thành phần
 
-# Or run directly with mode selection
-python main.py --mode realtime
+### InfluxDB Configuration
 
-# Run with debug logging
-python main.py --mode batch --debug
+```yaml
+# Trong docker-compose.yml
+environment:
+  - DOCKER_INFLUXDB_INIT_MODE=setup
+  - DOCKER_INFLUXDB_INIT_USERNAME=my-user
+  - DOCKER_INFLUXDB_INIT_PASSWORD=my-password
+  - DOCKER_INFLUXDB_INIT_ORG=my-org
+  - DOCKER_INFLUXDB_INIT_BUCKET=my-bucket
+  - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=my-super-secret-token
 ```
 
-### Sensor Configuration
+### Gateway Service Configuration
 
-Use the dedicated configuration tool for sensor setup:
-
-```bash
-# Read current sensor configuration
-python3 scripts/config_tool.py --info
-
-# Set output rate to 200 Hz
-python3 scripts/config_tool.py --rate 200
-
-# Set output content (acceleration and time data)
-python3 scripts/config_tool.py --output acc,time
-
-# Change baudrate to 115200
-python3 scripts/config_tool.py --baudrate 115200
-
-# Perform factory reset
-python3 scripts/config_tool.py --factory-reset
+```python
+# Environment variables
+MQTT_BROKER_HOST=mosquitto
+INFLUXDB_HOST=influxdb
+MQTT_DATA_TOPIC=sensor/hwt905/processed_data
+MQTT_MODEL_TOPIC=sensor/hwt905/model_update
+MODEL_PUBLISH_INTERVAL=60
 ```
 
-### Remote Configuration via MQTT
+### Prometheus Configuration
 
-The system includes a **standalone MQTT Configuration Service** that runs independently from the main application, allowing remote sensor configuration while the system operates in the field.
+```yaml
+# config/prometheus/prometheus.yml
+global:
+  scrape_interval: 15s
 
-#### Starting the Services
-
-```bash
-# 1. Start main data logging application
-./scripts/run_app.sh
-
-# 2. Start MQTT config service (in separate terminal)
-./scripts/start_mqtt_config.sh
-
-# Or run directly with options
-python3 scripts/mqtt_config_service.py --log-level INFO
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+  
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+  
+  - job_name: 'gateway_service'
+    static_configs:
+      - targets: ['gateway_service:8000']
 ```
 
-#### Service Architecture
+## AI Model Development
 
-```
-┌─────────────────┐    ┌─────────────────┐
-│  Main App       │    │ MQTT Config     │
-│ (Data Logging)  │    │ Service         │
-│                 │    │ (Remote Config) │
-└─────────┬───────┘    └─────────┬───────┘
-          │                      │
-          └──────┬──────┬────────┘
-                 │      │
-         ┌───────▼──────▼───────┐
-         │    HWT905 Sensor     │
-         └──────────────────────┘
-```
+### Cải thiện thuật toán
 
-#### MQTT Configuration Commands
+#### 1. **Thay đổi thuật toán**
 
-```bash
-# Test MQTT configuration interactively
-python3 scripts/mqtt_config_tester.py --broker localhost --interactive
+```python
+# Trong scripts/train_model.py
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.svm import SVC
+from sklearn.neural_network import MLPClassifier
 
-# Send specific commands via MQTT
-mosquitto_pub -h localhost -t "hwt905/commands" -m '{"command":"read_config"}'
+# Thay thế RandomForestClassifier
+model = GradientBoostingClassifier(n_estimators=200, learning_rate=0.1)
+# hoặc
+model = SVC(kernel='rbf', C=1.0)
+# hoặc
+model = MLPClassifier(hidden_layer_sizes=(100, 50), max_iter=500)
 ```
 
-#### Supported Commands
+#### 2. **Feature Engineering**
 
-```json
-// Set output rate to 200 Hz
-{
-  "command": "set_rate",
-  "value": 200
+```python
+def extract_features(df):
+    """Trích xuất features nâng cao"""
+    # Rolling statistics
+    df['disp_x_rolling_mean'] = df['disp_x'].rolling(window=10).mean()
+    df['disp_x_rolling_std'] = df['disp_x'].rolling(window=10).std()
+    
+    # Magnitude
+    df['displacement_magnitude'] = np.sqrt(df['disp_x']**2 + df['disp_y']**2 + df['disp_z']**2)
+    
+    # Frequency domain features (FFT)
+    df['disp_x_fft'] = np.abs(np.fft.fft(df['disp_x']))
+    
+    return df
+```
+
+#### 3. **Hyperparameter Tuning**
+
+```python
+from sklearn.model_selection import GridSearchCV
+
+param_grid = {
+    'n_estimators': [100, 200, 300],
+    'max_depth': [10, 20, None],
+    'min_samples_split': [2, 5, 10]
 }
 
-// Configure output data types
-{
-  "command": "set_output",
-  "acceleration": true,
-  "gyroscope": true,
-  "angle": true,
-  "magnetic": false
-}
-
-// Change sensor baudrate
-{
-  "command": "set_baudrate", 
-  "value": 115200
-}
-
-// Factory reset sensor
-{
-  "command": "factory_reset"
-}
-
-// Read current configuration
-{
-  "command": "read_config"
-}
-
-// Send raw hex commands
-{
-  "command": "raw_hex",
-  "data": "FF AA 27 19 00"
-}
+grid_search = GridSearchCV(RandomForestClassifier(), param_grid, cv=5)
+grid_search.fit(X_train, y_train)
+best_model = grid_search.best_estimator_
 ```
 
-#### Web Interface
+#### 4. **Deep Learning Integration**
 
-Open `templates/mqtt_config.html` in a web browser for a graphical interface to control the sensor remotely.
+```python
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout
 
-**📋 See [MQTT_CONFIG_SERVICE.md](MQTT_CONFIG_SERVICE.md) for detailed documentation.**
-
-### Mock Data Testing
-
-For development without physical hardware:
-
-```bash
-# Enable mock data in config/app_config.json
-"mock_data": true
-
-# Run with simulated sensor data
-python main.py
+def create_lstm_model(input_shape):
+    model = Sequential([
+        LSTM(50, return_sequences=True, input_shape=input_shape),
+        Dropout(0.2),
+        LSTM(50, return_sequences=False),
+        Dropout(0.2),
+        Dense(25),
+        Dense(1, activation='sigmoid')
+    ])
+    model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+    return model
 ```
 
-### Storage Management
+### Model Validation và Testing
 
-```bash
-# Monitor real-time data storage
-python scripts/data_manager.py monitor
+```python
+from sklearn.model_selection import cross_val_score, train_test_split
+from sklearn.metrics import classification_report, confusion_matrix
 
-# View storage statistics
-python scripts/data_manager.py stats
+# Cross validation
+scores = cross_val_score(model, X, y, cv=5)
+print(f"Cross-validation scores: {scores}")
+print(f"Average CV score: {scores.mean():.3f} (+/- {scores.std() * 2:.3f})")
 
-# Clean up old data files
-python scripts/data_manager.py cleanup --days 7
+# Train/test split
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+model.fit(X_train, y_train)
+y_pred = model.predict(X_test)
+
+# Evaluation
+print(classification_report(y_test, y_pred))
+print(confusion_matrix(y_test, y_pred))
 ```
-
-### Demo and Testing
-
-```bash
-# Run storage system demo
-python scripts/demo_storage.py
-
-# Run integration tests
-python scripts/test_integration.py
-```
-
-## Data Processing Pipeline
-
-### 1. Raw Data Acquisition
-- **Sensor Reading**: 200Hz acceleration data (X, Y, Z axes)
-- **Data Validation**: Checksum verification and packet integrity
-- **Unit Conversion**: Convert from sensor units (g) to SI units (m/s²)
-
-### 2. Signal Processing
-- **Pre-filtering**: Optional moving average or low-pass filtering
-- **RLS Integration**: Recursive Least Squares for velocity and displacement calculation
-- **FFT Analysis**: Frequency domain analysis for vibration characterization
-- **Feature Extraction**: Dominant frequencies and magnitude calculations
-
-### 3. Data Storage
-- **Real-time Storage**: Processed data saved to local files
-- **Format Options**: CSV (human-readable) or JSON (structured)
-- **File Management**: Automatic rotation based on size/time limits
-- **Batch Preparation**: Data organized for efficient transmission
-
-### 4. MQTT Transmission
-- **Immediate Mode**: Real-time transmission with local backup
-- **Batch Mode**: Store locally, transmit when connectivity available
-- **Data Compression**: Optional zlib compression for bandwidth efficiency
-- **QoS Control**: Configurable MQTT Quality of Service levels
-
-## Data Formats
-
-### CSV Output Format
-```csv
-timestamp,acc_x,acc_y,acc_z,acc_x_filtered,acc_y_filtered,acc_z_filtered,vel_x,vel_y,vel_z,disp_x,disp_y,disp_z,displacement_magnitude,dominant_freq_x,dominant_freq_y,dominant_freq_z,overall_dominant_frequency,rls_warmed_up
-1672531200.123,0.05,-0.02,9.78,0.048,-0.018,9.776,0.001,0.0005,0.002,0.00001,0.000005,0.00002,0.000025,1.2,0.8,1.5,1.5,true
-```
-
-### JSON Output Format
-```json
-{
-  "timestamp": 1672531200.123,
-  "acceleration": {
-    "raw": {"x": 0.05, "y": -0.02, "z": 9.78},
-    "filtered": {"x": 0.048, "y": -0.018, "z": 9.776}
-  },
-  "velocity": {"x": 0.001, "y": 0.0005, "z": 0.002},
-  "displacement": {
-    "x": 0.00001, "y": 0.000005, "z": 0.00002,
-    "magnitude": 0.000025
-  },
-  "frequency_analysis": {
-    "dominant_frequencies": {"x": 1.2, "y": 0.8, "z": 1.5},
-    "overall_dominant": 1.5
-  },
-  "rls_warmed_up": true
-}
-```
-
-## Changelog
-
-### v2.2.0 (Latest) - Startup Optimization & Config Management
-- **Startup Performance**: Removed unnecessary sensor reconfiguration on every startup for faster boot times
-- **Configuration Tool**: Added dedicated `sensor_config_tool.py` for standalone sensor configuration
-- **Better Separation**: Clean separation between operational runtime and configuration management
-- **Reduced Log Noise**: Eliminated configuration steps from normal operation logs
-
-### v2.1.0 - Error Handling & Stability Fixes
-- **Fixed Errno 5 Spam**: Added proper throttling for OSError (including Input/Output errors) to prevent log spam when sensor is disconnected
-- **Improved Ctrl+C Handling**: Enhanced signal handling to ensure application stops with single Ctrl+C press
-- **Better Connection Loss Detection**: SerialReaderThread now properly detects and handles connection loss
-- **Virtual Environment Support**: Added setup scripts for better dependency management
-
-### v2.0.0 - MQTT & Pipeline Refactoring
-- **MQTT Module Refactor**: Re-architected the MQTT client into a modular, strategy-based publisher (`BasePublisher`, `RealtimePublisher`, `BatchPublisher`, `PublisherFactory`).
-- **Asynchronous Pipeline**: Enhanced the data pipeline to four independent threads (`Reader` -> `Decoder` -> `Processor` -> `MqttPublisher`) using Queues for non-blocking, high-throughput operation.
-- **Configurable Payloads & Compression**:
-  - Implemented logic to send lean/customized MQTT payloads (e.g., only displacement and FFT results).
-  - Integrated `zlib` and `msgpack` for efficient, configurable data compression.
-- **Bug Fixes**: Resolved serialization (`KeyError`, `numpy.ndarray`) and import (`NameError`) errors for both `batch` and `realtime` MQTT strategies.
-
-### v1.0.0 - Initial Release
-- Initial implementation of the data processing system.
-- Supports reading from HWT905 sensor.
-- Includes RLS and FFT algorithms.
-- Basic local CSV storage.
 
 ## Troubleshooting
 
-### Common Issues
+### Lỗi thường gặp
 
-#### Sensor Connection Problems
+#### 1. **Container không khởi động được**
+
 ```bash
-# Check UART is enabled
-sudo dmesg | grep tty
+# Kiểm tra logs
+docker compose logs <service_name>
 
-# Test serial port
-sudo minicom -D /dev/ttyAMA0 -b 9600
-
-# Check permissions
-sudo usermod -a -G dialout $USER
+# Kiểm tra tài nguyên
+docker system df
+docker system prune  # Dọn dẹp nếu cần
 ```
 
-#### MQTT Connection Issues
-```bash
-# Test MQTT broker connectivity
-sudo apt install mosquitto-clients
-mosquitto_pub -h your-broker.com -t test/topic -m "test message"
+#### 2. **InfluxDB connection failed**
 
-# Check network connectivity
-ping your-broker.com
+```bash
+# Kiểm tra InfluxDB health
+curl http://localhost:8086/health
+
+# Restart InfluxDB
+docker compose restart influxdb
+
+# Kiểm tra quyền thư mục
+ls -la gateway_data/influxdb/
+sudo chown -R 1000:1000 gateway_data/influxdb
 ```
 
-#### Storage Space Issues
+#### 3. **MQTT connection refused**
+
 ```bash
-# Check available space
+# Test MQTT connection
+mosquitto_pub -h localhost -p 1883 -t test -m "hello"
+mosquitto_sub -h localhost -p 1883 -t test
+
+# Kiểm tra Mosquitto logs
+docker compose logs mosquitto
+```
+
+#### 4. **Prometheus targets DOWN**
+
+```bash
+# Kiểm tra network connectivity
+docker compose exec prometheus wget -qO- http://gateway_service:8000/metrics
+
+# Rebuild gateway service
+docker compose up -d --build gateway_service
+```
+
+#### 5. **Permission denied errors**
+
+```bash
+# Linux/macOS
+sudo chown -R $USER:$USER .
+sudo chmod -R 755 gateway_data/
+
+# Specific services
+sudo chown -R 472:472 gateway_data/grafana
+sudo chown -R 65534:65534 gateway_data/prometheus
+```
+
+#### 6. **Out of memory errors**
+
+```bash
+# Kiểm tra memory usage
+docker stats
+
+# Tăng memory limit trong docker-compose.yml
+services:
+  gateway_service:
+    mem_limit: 1g
+    memswap_limit: 1g
+```
+
+### Debug Commands
+
+```bash
+# Kiểm tra network
+docker network ls
+docker network inspect hwt905-raspi_default
+
+# Exec vào container
+docker compose exec gateway_service bash
+docker compose exec influxdb bash
+
+# Kiểm tra logs realtime
+docker compose logs -f --tail=100
+
+# Restart specific service
+docker compose restart <service_name>
+
+# Rebuild và restart
+docker compose up -d --build <service_name>
+```
+
+## Triển khai lên máy nhúng
+
+### Raspberry Pi Deployment
+
+#### Chuẩn bị Raspberry Pi
+
+```bash
+# Cập nhật hệ thống
+sudo apt update && sudo apt upgrade -y
+
+# Cài đặt Docker
+curl -fsSL https://get.docker.com -o get-docker.sh
+sh get-docker.sh
+sudo usermod -aG docker $USER
+
+# Cài đặt Docker Compose
+sudo apt install docker-compose-plugin
+```
+
+#### Lightweight Deployment
+
+Tạo `docker-compose.embedded.yml` cho máy nhúng:
+
+```yaml
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    ports:
+      - "1883:1883"
+    volumes:
+      - mosquitto_data:/mosquitto/data
+    restart: unless-stopped
+
+  gateway_service:
+    build:
+      context: services/gateway
+    depends_on:
+      - mosquitto
+    environment:
+      - MQTT_BROKER_HOST=mosquitto
+      - INFLUXDB_HOST=remote_influxdb_ip  # IP của server trung tâm
+    restart: unless-stopped
+
+volumes:
+  mosquitto_data:
+```
+
+#### Edge-only Deployment
+
+Tạo `edge-deployment/` folder:
+
+```
+edge-deployment/
+├── docker-compose.yml
+├── main.py                    # Script thu thập dữ liệu
+├── edge_inference.py          # Edge inference
+├── requirements.txt
+└── models/                    # Local models
+    └── latest_model.joblib
+```
+
+```python
+# edge-deployment/main.py - Simplified version
+import serial
+import json
+import paho.mqtt.client as mqtt
+import time
+
+def collect_and_send_data():
+    # Simplified data collection
+    ser = serial.Serial('/dev/ttyUSB0', 9600)
+    client = mqtt.Client()
+    client.connect("localhost", 1883, 60)
+    
+    while True:
+        data = ser.readline().decode().strip()
+        # Process and send data
+        client.publish("sensor/data", data)
+        time.sleep(0.1)
+
+if __name__ == "__main__":
+    collect_and_send_data()
+```
+
+#### Deployment Script
+
+```bash
+#!/bin/bash
+# deploy-to-edge.sh
+
+echo "Deploying to Raspberry Pi..."
+
+# Copy only necessary files
+rsync -av --exclude='gateway_data' \
+          --exclude='.git' \
+          --exclude='*.log' \
+          edge-deployment/ pi@raspberry-pi-ip:/home/pi/hwt905/
+
+# SSH and deploy
+ssh pi@raspberry-pi-ip << 'EOF'
+cd /home/pi/hwt905
+docker compose -f docker-compose.yml up -d --build
+EOF
+
+echo "Deployment completed!"
+```
+
+### Performance Optimization cho Embedded
+
+#### 1. **Giảm memory footprint**
+
+```python
+# Trong gateway_service.py
+import gc
+
+def optimize_memory():
+    gc.collect()  # Force garbage collection
+    
+# Batch processing thay vì real-time
+data_buffer = []
+BATCH_SIZE = 100
+
+def process_batch(data_batch):
+    # Process multiple data points at once
+    pass
+```
+
+#### 2. **Cấu hình Docker cho ARM**
+
+```dockerfile
+# services/gateway/Dockerfile.arm
+FROM python:3.9-slim-buster
+
+# Optimize for ARM
+RUN apt-get update && apt-get install -y \
+    --no-install-recommends \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install only essential packages
+COPY requirements.embedded.txt .
+RUN pip install --no-cache-dir -r requirements.embedded.txt
+
+COPY . .
+CMD ["python", "gateway_service.py"]
+```
+
+#### 3. **Data compression**
+
+```python
+import gzip
+import json
+
+def compress_data(data):
+    json_str = json.dumps(data)
+    compressed = gzip.compress(json_str.encode())
+    return compressed
+
+def decompress_data(compressed_data):
+    decompressed = gzip.decompress(compressed_data)
+    return json.loads(decompressed.decode())
+```
+
+## Monitoring và Maintenance
+
+### Health Checks
+
+```bash
+#!/bin/bash
+# health-check.sh
+
+echo "Checking system health..."
+
+# Check containers
+docker compose ps
+
+# Check disk space
 df -h
 
-# Monitor data directory size
-du -sh data/processed_data/
-
-# Clean up old files
-find data/processed_data/ -name "*.csv" -mtime +7 -delete
-```
-
-#### Performance Issues
-```bash
-# Monitor CPU usage
-htop
-
-# Check memory usage
+# Check memory
 free -h
 
-# Monitor I/O
-sudo iotop
+# Check specific endpoints
+curl -f http://localhost:8086/health || echo "InfluxDB unhealthy"
+curl -f http://localhost:9090/-/healthy || echo "Prometheus unhealthy"
+curl -f http://localhost:3000/api/health || echo "Grafana unhealthy"
 ```
 
-### Log Analysis
+### Backup Strategy
 
 ```bash
-# View application logs
-tail -f logs/application.log
+#!/bin/bash
+# backup.sh
 
-# Search for errors
-grep -i error logs/application.log
+BACKUP_DIR="/backup/$(date +%Y%m%d)"
+mkdir -p $BACKUP_DIR
 
-# Monitor real-time processing
-grep "processed.*samples" logs/application.log
+# Backup InfluxDB
+docker compose exec influxdb influx backup /tmp/backup
+docker cp influxdb:/tmp/backup $BACKUP_DIR/influxdb
+
+# Backup Grafana
+cp -r gateway_data/grafana $BACKUP_DIR/
+
+# Backup configurations
+cp -r config $BACKUP_DIR/
+
+echo "Backup completed: $BACKUP_DIR"
 ```
 
-## Production Deployment
-
-### System Service Setup
-
-Create a systemd service for automatic startup:
+### Log Rotation
 
 ```bash
-# Create service file
-sudo nano /etc/systemd/system/hwt905-sensor.service
+# /etc/logrotate.d/docker-hwt905
+/var/lib/docker/containers/*/*.log {
+    daily
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0644 root root
+    postrotate
+        docker kill --signal=USR1 $(docker ps -q) 2>/dev/null || true
+    endscript
+}
 ```
 
-```ini
-[Unit]
-Description=HWT905 Sensor Data Processing
-After=network.target
+## Mở rộng hệ thống
 
-[Service]
-Type=simple
-User=pi
-WorkingDirectory=/home/pi/hwt905-raspi
-Environment=PATH=/home/pi/hwt905-raspi/venv/bin
-ExecStart=/home/pi/hwt905-raspi/venv/bin/python main.py
-Restart=always
-RestartSec=10
+### Thêm service mới
 
-[Install]
-WantedBy=multi-user.target
+1. Tạo thư mục `services/new_service/`
+2. Thêm Dockerfile và source code
+3. Cập nhật `docker-compose.yml`
+4. Cập nhật Prometheus config nếu cần
+
+### Horizontal Scaling
+
+```yaml
+# docker-compose.yml
+services:
+  gateway_service:
+    deploy:
+      replicas: 3
+    # Load balancer configuration
 ```
+
+### Multi-node Deployment
+
+```yaml
+# docker-swarm.yml
+version: '3.8'
+services:
+  gateway_service:
+    deploy:
+      replicas: 3
+      placement:
+        constraints:
+          - node.role == worker
+```
+
+## Bảo mật
+
+### MQTT Security
 
 ```bash
-# Enable and start service
-sudo systemctl enable hwt905-sensor.service
-sudo systemctl start hwt905-sensor.service
-
-# Check status
-sudo systemctl status hwt905-sensor.service
+# Tạo user/password cho MQTT
+docker compose exec mosquitto mosquitto_passwd -c /mosquitto/config/passwd username
 ```
 
-### Monitoring and Maintenance
+### InfluxDB Security
 
 ```bash
-# Setup log rotation
-sudo nano /etc/logrotate.d/hwt905-sensor
-
-# Monitor service health
-sudo systemctl status hwt905-sensor.service
-
-# View service logs
-sudo journalctl -u hwt905-sensor.service -f
+# Thay đổi default tokens
+export DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=$(openssl rand -hex 32)
 ```
 
-### Performance Optimization
+### Network Security
 
-```bash
-# Increase swap for stability
-sudo dphys-swapfile swapoff
-sudo nano /etc/dphys-swapfile  # Set CONF_SWAPSIZE=1024
-sudo dphys-swapfile setup
-sudo dphys-swapfile swapon
+```yaml
+# docker-compose.yml
+networks:
+  internal:
+    driver: bridge
+    internal: true
+  external:
+    driver: bridge
 
-# Optimize for real-time processing
-echo 'kernel.sched_rt_runtime_us = -1' | sudo tee -a /etc/sysctl.conf
+services:
+  gateway_service:
+    networks:
+      - internal
+      - external
 ```
 
-## API Reference
+## Liên hệ và Hỗ trợ
 
-### SensorDataProcessor Class
+- **Issues**: Tạo issue trên GitHub repository
+- **Documentation**: Xem thêm tại `/docs` folder
+- **Community**: Join Discord/Slack channel
 
-Main data processing class with integrated storage capabilities.
+---
 
-```python
-from src.processing.data_processor import SensorDataProcessor
-
-processor = SensorDataProcessor(
-    dt_sensor=0.005,           # 200Hz sampling rate
-    gravity_g=9.81,            # Earth gravity
-    storage_config={           # Storage configuration
-        "enabled": True,
-        "format": "csv",
-        "base_dir": "data/processed_data"
-    }
-)
-
-# Process new sensor sample
-result = processor.process_new_sample(acc_x_g, acc_y_g, acc_z_g)
-
-# Get batch data for offline transmission
-batch_data = processor.get_batch_for_transmission()
-
-# Clean up resources
-processor.close()
-```
-
-### Storage Manager
-
-Direct access to storage functionality.
-
-```python
-from src.processing.data_storage import StorageManager
-
-storage = StorageManager({
-    "enabled": True,
-    "format": "csv",
-    "max_file_size_mb": 10
-})
-
-# Store processed data
-storage.store_processed_data(data, timestamp)
-
-# Retrieve batch for transmission
-batch = storage.get_batch_for_transmission()
-```
-
-## Contributing
-
-### Development Setup
-
-```bash
-# Install development dependencies
-pip install -r requirements-dev.txt
-
-# Run tests
-python -m pytest tests/
-
-# Code formatting
-black src/ scripts/
-flake8 src/ scripts/
-```
-
-### Code Structure
-
-```
-src/
-├── processing/          # Data processing modules
-│   ├── data_processor.py     # Main processor with storage
-│   ├── data_storage.py       # Storage management
-│   ├── data_filter.py        # Signal filtering
-│   └── algorithms/           # Processing algorithms
-├── sensors/             # Sensor communication
-├── mqtt/               # MQTT client
-├── core/               # Main application logic
-└── utils/              # Utility functions
-
-scripts/                # Management and demo scripts
-config/                 # Configuration files
-data/                   # Data storage directory
-```
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Support
-
-For technical support or questions:
-- Create an issue in the project repository
-- Review the troubleshooting section above
-- Check the logs for detailed error information
-
-### System Health Check
-
-Before deployment, run the system health check to ensure everything is properly configured:
-
-```bash
-# Run comprehensive system check
-./scripts/system_check.sh
-
-# This will verify:
-# ✅ File permissions and directory structure
-# ✅ Python dependencies and imports  
-# ✅ Configuration file validity
-# ✅ System resources and USB devices
-# ✅ Basic functionality tests
-```
-
-**Output Example:**
-```
-✅ System health check completed
-🚀 System ready for operation
-📋 Quick Start Commands:
-   Start main app:          ./scripts/run_app.sh
-   Test auto-reconnection:  ./scripts/test_auto_reconnection.sh
-```
-
-#### Testing Auto-Reconnection
-
-Use the provided test script to verify auto-reconnection functionality:
-
-```bash
-# Interactive test mode (recommended)
-./scripts/test_auto_reconnection.sh
-
-# Monitor logs only
-./scripts/test_auto_reconnection.sh monitor
-
-# Automated test (60-second monitoring window)
-./scripts/test_auto_reconnection.sh auto
-
-# Check current USB devices
-./scripts/test_auto_reconnection.sh devices
-```
-
-**Test Procedure:**
-1. Start the main application
-2. Wait for successful sensor connection
-3. Physically disconnect the USB sensor cable
-4. Observe automatic detection of connection loss
-5. Reconnect the USB cable
-6. Verify automatic reconnection and system recovery
-
-**Expected Log Output:**
-```
-🔄 Bắt đầu quá trình kết nối lại...
-✅ Cảm biến đã được kết nối lại thành công!
-✅ Đã kết nối lại thành công và khởi động lại hệ thống!
-```
+**Lưu ý**: Tài liệu này được cập nhật thường xuyên. Vui lòng kiểm tra version mới nhất trước khi triển khai.
